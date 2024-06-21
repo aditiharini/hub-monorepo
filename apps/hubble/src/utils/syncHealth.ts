@@ -20,7 +20,7 @@ import { addressInfoFromGossip, addressInfoToString } from "./p2p.js";
 
 import { SyncId, timestampToPaddedTimestampPrefix } from "../network/sync/syncId.js";
 import { err, ok } from "neverthrow";
-import { toTrieNodeMetadataResponse } from "rpc/server.js";
+import { toTrieNodeMetadataResponse } from "../rpc/server.js";
 import SyncEngine from "network/sync/syncEngine.js";
 
 class SyncHealthMessageStats {
@@ -169,6 +169,7 @@ export class SyncEngineMetadataRetriever implements MetadataRetriever {
 
 const getTimePrefix = (time: number) => {
   return toFarcasterTime(time).map((farcasterTime) => {
+    console.log("farcaster time", farcasterTime);
     return Buffer.from(timestampToPaddedTimestampPrefix(farcasterTime));
   });
 };
@@ -232,6 +233,10 @@ const getPrefixInfo = async (metadataRetriever: MetadataRetriever, startTime: nu
   }
 
   const commonPrefix = getCommonPrefix(startTimePrefix.value, stopTimePrefix.value);
+
+  console.log(startTimePrefix);
+  console.log(stopTimePrefix);
+  console.log(commonPrefix);
 
   const commonPrefixMetadata = await metadataRetriever.getMetadata(Buffer.from(commonPrefix));
 

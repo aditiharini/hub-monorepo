@@ -11,10 +11,11 @@ import {
   OnChainEvent,
   UserNameProof,
   MessageData,
+  fromFarcasterTime,
 } from "@farcaster/hub-nodejs";
 import { APP_NICKNAME, APP_VERSION, HubInterface } from "../../hubble.js";
 import SyncEngine from "./syncEngine.js";
-import { SyncId } from "./syncId.js";
+import { SyncId, timestampToPaddedTimestampPrefix } from "./syncId.js";
 import Server from "../../rpc/server.js";
 import { jestRocksDB } from "../../storage/db/jestUtils.js";
 import Engine from "../../storage/engine/index.js";
@@ -22,6 +23,7 @@ import { MockHub } from "../../test/mocks.js";
 import { sleep, sleepWhile } from "../../utils/crypto.js";
 import { ensureMessageData } from "../../storage/db/message.js";
 import { EMPTY_HASH } from "./merkleTrie.js";
+import { SyncEngineMetadataRetriever, computeSyncHealthMessageStats } from "../../utils/syncHealth.js";
 
 const TEST_TIMEOUT_SHORT = 10 * 1000;
 const TEST_TIMEOUT_LONG = 60 * 1000;
@@ -737,6 +739,64 @@ describe("Multi peer sync engine", () => {
       clientForServer2.$.close();
       await server2.stop();
     }
+  });
+
+  test("sync health", async () => {
+    const metadataRetriever1 = new SyncEngineMetadataRetriever(syncEngine1);
+    const metadataRetriever2 = new SyncEngineMetadataRetriever(syncEngine2);
+
+    // Engine1 has no messages
+    await engine1.mergeOnChainEvent(custodyEvent);
+    await engine1.mergeOnChainEvent(signerEvent);
+    await engine1.mergeOnChainEvent(storageEvent);
+
+    const farcasterTime = getFarcasterTime()._unsafeUnwrap() - 1000;
+
+    await addMessagesWithTimeDelta(engine1, [50, 55, 60]);
+
+    await sleepWhile(() => syncEngine1.syncTrieQSize > 0, SLEEPWHILE_TIMEOUT);
+
+    console.log("custody event farcaster time", custodyEvent.blockTimestamp);
+    console.log("storage event farcaster time", storageEvent.blockTimestamp);
+
+    const metadata = await syncEngine1.getTrieNodeMetadata(new Uint8Array());
+    console.log(metadata);
+
+    const startTime = fromFarcasterTime(farcasterTime + 40);
+    const stopTime = fromFarcasterTime(farcasterTime + 70);
+
+    if (startTime.isErr()) {
+      throw startTime.error;
+    }
+
+    if (stopTime.isErr()) {
+      throw stopTime.error;
+    }
+    console.log(startTime, stopTime);
+
+    const messageStats = await computeSyncHealthMessageStats(
+      startTime.value,
+      stopTime.value,
+      metadataRetriever1,
+      metadataRetriever2,
+    );
+
+    if (messageStats.isErr()) {
+      throw messageStats.error;
+    }
+
+    expect(messageStats.value.primaryNumMessages).toEqual(3);
+    expect(messageStats.value.peerNumMessages).toEqual(0);
+    // const msgTimestamp = 30662167;
+    // const generateTimestamps = (seconds: number) => {
+    //   const timestamps = [];
+    //   for (let j = 0; j < seconds; j++) {
+    //     timestamps.push(msgTimestamp + j);
+    //   }
+    //   return timestamps;
+    // };
+
+    // const addedMessages = await addMessagesWithTimeDelta(engine1, generateTimestamps(3));
   });
 
   xtest(

@@ -2,7 +2,11 @@ import cron from "node-cron";
 import { logger } from "../../utils/logger.js";
 import { HubAsyncResult } from "@farcaster/core";
 import SyncEngine from "./syncEngine.js";
-import { RpcMetadataRetriever, SyncEngineMetadataRetriever, computeSyncHealthMessageStats } from "utils/syncHealth.js";
+import {
+  RpcMetadataRetriever,
+  SyncEngineMetadataRetriever,
+  computeSyncHealthMessageStats,
+} from "../../utils/syncHealth.js";
 import { HubInterface } from "hubble.js";
 
 const log = logger.child({

@@ -92,10 +92,10 @@ import OnChainEventStore from "./storage/stores/onChainEventStore.js";
 import { areMessagesInDb, ensureMessageData, isMessageInDB } from "./storage/db/message.js";
 import { getFarcasterTime, HubResult, MessageBundle } from "@farcaster/core";
 import { MerkleTrie } from "./network/sync/merkleTrie.js";
+import { MeasureSyncHealthJobScheduler } from "./network/sync/syncHealthJob.js";
 import { DEFAULT_CATCHUP_SYNC_SNAPSHOT_MESSAGE_LIMIT } from "./defaultConfig.js";
 import { diagnosticReporter } from "./utils/diagnosticReport.js";
 import { startupCheck, StartupCheckStatus } from "./utils/startupCheck.js";
-import { MeasureSyncHealthJobScheduler } from "network/sync/syncHealthJob.js";
 
 export type HubSubmitSource = "gossip" | "rpc" | "eth-provider" | "l2-provider" | "sync" | "fname-registry";
 
