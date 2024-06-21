@@ -95,6 +95,7 @@ import { MerkleTrie } from "./network/sync/merkleTrie.js";
 import { DEFAULT_CATCHUP_SYNC_SNAPSHOT_MESSAGE_LIMIT } from "./defaultConfig.js";
 import { diagnosticReporter } from "./utils/diagnosticReport.js";
 import { startupCheck, StartupCheckStatus } from "./utils/startupCheck.js";
+import { MeasureSyncHealthJobScheduler } from "network/sync/syncHealthJob.js";
 
 export type HubSubmitSource = "gossip" | "rpc" | "eth-provider" | "l2-provider" | "sync" | "fname-registry";
 
@@ -369,6 +370,7 @@ export class Hub implements HubInterface {
   private checkIncomingPortsJobScheduler: CheckIncomingPortsJobScheduler;
   private updateNetworkConfigJobScheduler: UpdateNetworkConfigJobScheduler;
   private dbSnapshotBackupJobScheduler: DbSnapshotBackupJobScheduler;
+  private measureSyncHealthJobScheduler: MeasureSyncHealthJobScheduler;
 
   private submitMessageLogger = new SubmitMessageSuccessLogCache(log);
 
@@ -531,6 +533,7 @@ export class Hub implements HubInterface {
       this.syncEngine,
       this.options,
     );
+    this.measureSyncHealthJobScheduler = new MeasureSyncHealthJobScheduler(this.syncEngine, this);
 
     if (options.testUsers) {
       this.testDataJobScheduler = new PeriodicTestDataJobScheduler(this.rpcServer, options.testUsers as TestUser[]);
@@ -792,6 +795,7 @@ export class Hub implements HubInterface {
     this.validateOrRevokeMessagesJobScheduler.start();
     this.gossipContactInfoJobScheduler.start("*/1 * * * *"); // Every minute
     this.checkIncomingPortsJobScheduler.start();
+    this.measureSyncHealthJobScheduler.start();
 
     // Mainnet only jobs
     if (this.options.network === FarcasterNetwork.MAINNET) {
@@ -1204,6 +1208,7 @@ export class Hub implements HubInterface {
     this.checkIncomingPortsJobScheduler.stop();
     this.updateNetworkConfigJobScheduler.stop();
     this.dbSnapshotBackupJobScheduler.stop();
+    this.measureSyncHealthJobScheduler.stop();
 
     // Stop the engine
     await this.engine.stop();
