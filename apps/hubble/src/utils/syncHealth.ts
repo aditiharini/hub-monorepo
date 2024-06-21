@@ -162,6 +162,7 @@ export class SyncEngineMetadataRetriever implements MetadataRetriever {
     if (result) {
       return ok(toTrieNodeMetadataResponse(result));
     } else {
+      console.log("error prefix", prefix);
       return err(new HubError("unavailable", "Missing metadata for node"));
     }
   };
@@ -169,7 +170,6 @@ export class SyncEngineMetadataRetriever implements MetadataRetriever {
 
 const getTimePrefix = (time: number) => {
   return toFarcasterTime(time).map((farcasterTime) => {
-    console.log("farcaster time", farcasterTime);
     return Buffer.from(timestampToPaddedTimestampPrefix(farcasterTime));
   });
 };
@@ -233,10 +233,6 @@ const getPrefixInfo = async (metadataRetriever: MetadataRetriever, startTime: nu
   }
 
   const commonPrefix = getCommonPrefix(startTimePrefix.value, stopTimePrefix.value);
-
-  console.log(startTimePrefix);
-  console.log(stopTimePrefix);
-  console.log(commonPrefix);
 
   const commonPrefixMetadata = await metadataRetriever.getMetadata(Buffer.from(commonPrefix));
 

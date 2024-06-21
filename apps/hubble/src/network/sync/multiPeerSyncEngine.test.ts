@@ -751,19 +751,19 @@ describe("Multi peer sync engine", () => {
     await engine1.mergeOnChainEvent(storageEvent);
 
     const farcasterTime = getFarcasterTime()._unsafeUnwrap() - 1000;
-
-    await addMessagesWithTimeDelta(engine1, [50, 55, 60]);
+    await addMessagesWithTimeDelta(engine1, [150, 170, 190]);
 
     await sleepWhile(() => syncEngine1.syncTrieQSize > 0, SLEEPWHILE_TIMEOUT);
 
-    console.log("custody event farcaster time", custodyEvent.blockTimestamp);
-    console.log("storage event farcaster time", storageEvent.blockTimestamp);
+    const metadata = await syncEngine1.getTrieNodeMetadata(new Uint8Array([48]));
+    console.log("metadata", metadata);
 
-    const metadata = await syncEngine1.getTrieNodeMetadata(new Uint8Array());
-    console.log(metadata);
+    const syncIds = await syncEngine1.getAllSyncIdsByPrefix(new Uint8Array());
+    console.log("num items", await syncEngine1.trie.items());
+    console.log("sync ids", syncIds);
 
-    const startTime = fromFarcasterTime(farcasterTime + 40);
-    const stopTime = fromFarcasterTime(farcasterTime + 70);
+    const startTime = fromFarcasterTime(farcasterTime + 100);
+    const stopTime = fromFarcasterTime(farcasterTime + 200);
 
     if (startTime.isErr()) {
       throw startTime.error;
@@ -772,7 +772,6 @@ describe("Multi peer sync engine", () => {
     if (stopTime.isErr()) {
       throw stopTime.error;
     }
-    console.log(startTime, stopTime);
 
     const messageStats = await computeSyncHealthMessageStats(
       startTime.value,
