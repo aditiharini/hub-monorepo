@@ -5,6 +5,7 @@ import {
   ContactInfoContent,
   ContactInfoContentBody,
   FarcasterNetwork,
+  fromFarcasterTime,
   getInsecureHubRpcClient,
   getSSLHubRpcClient,
   GossipAddressInfo,
@@ -107,7 +108,7 @@ export const SNAPSHOT_S3_UPLOAD_BUCKET = "farcaster-snapshots";
 export const SNAPSHOT_S3_DOWNLOAD_BUCKET = "download.farcaster.xyz";
 export const S3_REGION = "auto";
 
-export const FARCASTER_VERSION = "2024.6.12";
+export const FARCASTER_VERSION = "2024.7.24";
 export const FARCASTER_VERSIONS_SCHEDULE: VersionSchedule[] = [
   { version: "2023.3.1", expiresAt: 1682553600000 }, // expires at 4/27/23 00:00 UTC
   { version: "2023.4.19", expiresAt: 1686700800000 }, // expires at 6/14/23 00:00 UTC
@@ -121,16 +122,24 @@ export const FARCASTER_VERSIONS_SCHEDULE: VersionSchedule[] = [
   { version: "2024.3.20", expiresAt: 1715731200000 }, // expires at 5/15/24 00:00 UTC
   { version: "2024.5.1", expiresAt: 1719360000000 }, // expires at 6/26/24 00:00 UTC
   { version: "2024.6.12", expiresAt: 1722988800000 }, // expires at 8/7/24 00:00 UTC
+  { version: "2024.7.24", expiresAt: 1726617600000 }, // expires at 9/18/24 00:00 UTC
 ];
 
-const MAX_CONTACT_INFO_AGE_MS = GOSSIP_SEEN_TTL;
+const MAX_CONTACT_INFO_AGE_MS = 1000 * 60 * 60; // 60 minutes
+const CONTACT_INFO_UPDATE_THRESHOLD_MS = 1000 * 60 * 30; // 30 minutes
+const ALLOWED_CLOCK_SKEW_SECONDS = 60 * 10; // 10 minutes
 
 export interface HubInterface {
   engine: Engine;
   identity: string;
   hubOperatorFid?: number;
   submitMessage(message: Message, source?: HubSubmitSource): HubAsyncResult<number>;
-  submitMessageBundle(messageBundle: MessageBundle, source?: HubSubmitSource): Promise<HubResult<number>[]>;
+  submitMessageBundle(
+    creationFarcasterTime: number,
+    messageBundle: MessageBundle,
+    source?: HubSubmitSource,
+    peerId?: PeerId,
+  ): Promise<HubResult<number>[]>;
   validateMessage(message: Message): HubAsyncResult<Message>;
   submitUserNameProof(usernameProof: UserNameProof, source?: HubSubmitSource): HubAsyncResult<number>;
   submitOnChainEvent(event: OnChainEvent, source?: HubSubmitSource): HubAsyncResult<number>;
@@ -349,7 +358,6 @@ export class Hub implements HubInterface {
   private adminServer: AdminServer;
   private httpApiServer: HttpAPIServer;
 
-  private contactTimer?: NodeJS.Timer;
   private rocksDB: RocksDB;
   private syncEngine: SyncEngine;
   private allowedPeerIds: string[] | undefined;
@@ -790,7 +798,9 @@ export class Hub implements HubInterface {
     this.pruneEventsJobScheduler.start(this.options.pruneEventsJobCron);
     this.checkFarcasterVersionJobScheduler.start();
     this.validateOrRevokeMessagesJobScheduler.start();
-    this.gossipContactInfoJobScheduler.start("*/1 * * * *"); // Every minute
+
+    const randomMinute = Math.floor(Math.random() * 30);
+    this.gossipContactInfoJobScheduler.start(`${randomMinute} */30 * * * *`); // Random minute every 30 minutes
     this.checkIncomingPortsJobScheduler.start();
 
     // Mainnet only jobs
@@ -1176,7 +1186,6 @@ export class Hub implements HubInterface {
   /** Stop the GossipNode and RPC Server */
   async stop(reason: HubShutdownReason, terminateGossipWorker = true) {
     log.info("Stopping Hubble...");
-    clearInterval(this.contactTimer);
 
     // First, stop the RPC/Gossip server so we don't get any more messages
     if (!this.options.httpServerDisabled) {
@@ -1251,6 +1260,8 @@ export class Hub implements HubInterface {
       );
 
       await this.gossipNode.gossipContactInfo(contactInfo);
+      statsd().gauge("peer_store.count", await this.gossipNode.peerStoreCount());
+      statsd().gauge("active_peers.count", this.syncEngine.getActivePeerCount());
       return Promise.resolve(ok(undefined));
     }
   }
@@ -1261,12 +1272,34 @@ export class Hub implements HubInterface {
 
   private async handleGossipMessage(gossipMessage: GossipMessage, source: PeerId, msgId: string): HubAsyncResult<void> {
     let reportedAsInvalid = false;
+    const currentTime = getFarcasterTime().unwrapOr(0);
+    const messageFirstGossipedTime = gossipMessage.timestamp ?? 0;
+    const gossipMessageDelay = currentTime - messageFirstGossipedTime;
     if (gossipMessage.timestamp) {
+      if (gossipMessage.timestamp > currentTime && gossipMessage.timestamp - currentTime > ALLOWED_CLOCK_SKEW_SECONDS) {
+        log.error(
+          {
+            allowedClockSkew: ALLOWED_CLOCK_SKEW_SECONDS,
+            currentTime,
+            gossipMessageTimestamp: gossipMessage.timestamp,
+            source: source.toString(),
+          },
+          "Received gossip message with future timestamp",
+        );
+        await this.gossipNode.reportValid(msgId, peerIdFromString(source.toString()).toBytes(), false);
+        return err(
+          new HubError(
+            "bad_request.invalid_param",
+            "Invalid Farcaster timestamp in gossip message - future timestamp found in seconds from Farcaster Epoch",
+          ),
+        );
+      }
       // If message is older than seenTTL, we will try to merge it, but report it as invalid so it doesn't
       // propogate across the network
       const cutOffTime = getFarcasterTime().unwrapOr(0) - GOSSIP_SEEN_TTL / 1000;
 
       if (gossipMessage.timestamp < cutOffTime) {
+        statsd().timing("gossip.message_bundle_delay.invalid", gossipMessageDelay);
         await this.gossipNode.reportValid(msgId, peerIdFromString(source.toString()).toBytes(), false);
         reportedAsInvalid = true;
       }
@@ -1298,10 +1331,6 @@ export class Hub implements HubInterface {
         });
         return err(new HubError("unavailable", msg));
       }
-
-      const currentTime = getFarcasterTime().unwrapOr(0);
-      const messageFirstGossipedTime = gossipMessage.timestamp ?? 0;
-      const gossipMessageDelay = currentTime - messageFirstGossipedTime;
 
       // Merge the message
       if (gossipMessage.message) {
@@ -1338,14 +1367,13 @@ export class Hub implements HubInterface {
             await this.gossipNode.reportValid(msgId, peerIdFromString(source.toString()).toBytes(), false);
           }
         }
-        statsd().timing("gossip.message_delay", gossipMessageDelay);
         const mergeResult = result.isOk() ? "success" : "failure";
-        statsd().timing(`gossip.message_delay.${mergeResult}`, gossipMessageDelay);
+        statsd().timing("gossip.message_delay", gossipMessageDelay, { status: mergeResult });
 
         return result.map(() => undefined);
       } else if (gossipMessage.messageBundle) {
         const bundle = gossipMessage.messageBundle;
-        const results = await this.submitMessageBundle(bundle, "gossip");
+        const results = await this.submitMessageBundle(messageFirstGossipedTime, bundle, "gossip", source);
 
         // If at least one is Ok, report as valid
         const atLeastOneOk = results.find((r) => r.isOk());
@@ -1353,6 +1381,7 @@ export class Hub implements HubInterface {
           if (!reportedAsInvalid) {
             await this.gossipNode.reportValid(msgId, peerIdFromString(source.toString()).toBytes(), true);
           }
+          statsd().timing("gossip.message_bundle_delay.success", gossipMessageDelay);
         } else {
           const errCode = results[0]?._unsafeUnwrapErr()?.errCode as string;
           const errMsg = results[0]?._unsafeUnwrapErr()?.message;
@@ -1378,8 +1407,8 @@ export class Hub implements HubInterface {
           if (!reportedAsInvalid) {
             await this.gossipNode.reportValid(msgId, peerIdFromString(source.toString()).toBytes(), false);
           }
+          statsd().timing("gossip.message_bundle_delay.failure", gossipMessageDelay);
         }
-        statsd().timing("gossip.message_bundle_delay", gossipMessageDelay);
 
         return ok(undefined);
       } else {
@@ -1396,8 +1425,6 @@ export class Hub implements HubInterface {
   }
 
   private async handleContactInfo(peerId: PeerId, content: ContactInfoContent): Promise<boolean> {
-    statsd().gauge("peer_store.count", await this.gossipNode.peerStoreCount());
-
     let message: ContactInfoContentBody = content.body
       ? content.body
       : ContactInfoContentBody.create({
@@ -1413,6 +1440,7 @@ export class Hub implements HubInterface {
 
     // Don't process messages that are too old
     if (message.timestamp && message.timestamp < Date.now() - MAX_CONTACT_INFO_AGE_MS) {
+      statsd().increment("gossip.contact_info.too_old", 1);
       log.debug({ message }, "contact info message is too old");
       return false;
     }
@@ -1515,7 +1543,7 @@ export class Hub implements HubInterface {
     log.debug({ identity: this.identity, peer: peerId, message }, "received peer ContactInfo");
 
     // Check if we already have this client
-    const result = this.syncEngine.addContactInfoForPeerId(peerId, message);
+    const result = this.syncEngine.addContactInfoForPeerId(peerId, message, CONTACT_INFO_UPDATE_THRESHOLD_MS);
     if (result.isOk() && !this.performedFirstSync) {
       // Sync with the first peer so we are upto date on startup.
       this.performedFirstSync = true;
@@ -1642,11 +1670,15 @@ export class Hub implements HubInterface {
     });
 
     this.gossipNode.on("peerConnect", async () => {
+      // NB: Gossiping our own contact info is commented out, since at the time of
+      // writing this the p2p network has overwhelming number of peers and spends more
+      // time processing contact info than messages. We may uncomment in the future
+      // if peer counts drop.
       // When we connect to a new node, gossip out our contact info 1 second later.
       // The setTimeout is to ensure that we have a chance to receive the peer's info properly.
-      setTimeout(async () => {
-        await this.gossipContactInfo();
-      }, 1 * 1000);
+      // setTimeout(async () => {
+      //   await this.gossipContactInfo();
+      // }, 1 * 1000);
       statsd().increment("peer_connect.count");
     });
 
@@ -1655,13 +1687,40 @@ export class Hub implements HubInterface {
       this.syncEngine.removeContactInfoForPeerId(connection.remotePeer.toString());
       statsd().increment("peer_disconnect.count");
     });
+
+    this.gossipNode.on("peerDiscovery", async (peerInfo) => {
+      // NB: The current code is not in use - we would require a source to emit peerDiscovery events.
+      // This is a placeholder for future use.
+
+      // Add discovered peer to sync engine
+      const peerId = peerInfo.id;
+      const peerAddresses = peerInfo.multiaddrs;
+
+      // sorts addresses by Public IPs first
+      const addr = peerAddresses.sort((a, b) =>
+        publicAddressesFirst({ multiaddr: a, isCertified: false }, { multiaddr: b, isCertified: false }),
+      )[0];
+      if (addr === undefined) {
+        log.info(
+          { function: "peerDiscovery", peerId: peerId.toString() },
+          "peer found but no address is available to request sync",
+        );
+        return;
+      }
+      await this.gossipNode.addPeerToAddressBook(peerId, addr);
+    });
   }
 
   /* -------------------------------------------------------------------------- */
   /*                               RPC Handler API                              */
   /* -------------------------------------------------------------------------- */
 
-  async submitMessageBundle(messageBundle: MessageBundle, source?: HubSubmitSource): Promise<HubResult<number>[]> {
+  async submitMessageBundle(
+    creationFarcasterTime: number,
+    messageBundle: MessageBundle,
+    source?: HubSubmitSource,
+    peerId?: PeerId,
+  ): Promise<HubResult<number>[]> {
     if (this.syncEngine.syncTrieQSize > MAX_SYNCTRIE_QUEUE_SIZE) {
       log.warn({ syncTrieQSize: this.syncEngine.syncTrieQSize }, "SubmitMessage rejected: Sync trie queue is full");
       // Since we're rejecting the full bundle, return an error for each message
@@ -1674,6 +1733,8 @@ export class Hub implements HubInterface {
     const allResults: Map<number, HubResult<number>> = new Map();
 
     const dedupedMessages: { i: number; message: Message }[] = [];
+    let earliestTimestamp = Infinity;
+    let latestTimestamp = -Infinity;
     if (source === "gossip") {
       // Go over all the messages and see if they are in the DB. If they are, don't bother processing them
       const messagesExist = await areMessagesInDb(this.rocksDB, messageBundle.messages);
@@ -1683,16 +1744,57 @@ export class Hub implements HubInterface {
           log.debug({ source }, "submitMessageBundle rejected: Message already exists");
           allResults.set(i, err(new HubError("bad_request.duplicate", "message has already been merged")));
         } else {
-          dedupedMessages.push({ i, message: ensureMessageData(messageBundle.messages[i] as Message) });
+          const message = ensureMessageData(messageBundle.messages[i] as Message);
+          earliestTimestamp = Math.min(earliestTimestamp, message.data?.timestamp ?? Infinity);
+          latestTimestamp = Math.max(latestTimestamp, message.data?.timestamp ?? -Infinity);
+          dedupedMessages.push({ i, message });
         }
       }
     } else {
-      dedupedMessages.push(...messageBundle.messages.map((message, i) => ({ i, message: ensureMessageData(message) })));
+      const initialResult = {
+        earliest: Infinity,
+        latest: -Infinity,
+        deduped: [] as { i: number; message: Message }[],
+      };
+      const { deduped, earliest, latest } = messageBundle.messages.reduce((acc, message, i) => {
+        const messageData = ensureMessageData(message);
+        acc.earliest = Math.min(acc.earliest, messageData.data?.timestamp ?? Infinity);
+        acc.latest = Math.max(acc.latest, messageData.data?.timestamp ?? -Infinity);
+        acc.deduped.push({ i, message: messageData });
+        return acc;
+      }, initialResult);
+      earliestTimestamp = earliest;
+      latestTimestamp = latest;
+      dedupedMessages.push(...deduped);
     }
+    const tags: { [key: string]: string } = {
+      ...(source ? { source } : {}),
+      ...(peerId ? { peer_id: peerId.toString() } : {}),
+    };
+
+    statsd().gauge("hub.submit_message_bundle.size", dedupedMessages.length, tags);
+    statsd().gauge(
+      "hub.submit_message_bundle.earliest_timestamp_ms",
+      fromFarcasterTime(earliestTimestamp).unwrapOr(0),
+      tags,
+    );
+    statsd().gauge(
+      "hub.submit_message_bundle.latest_timestamp_ms",
+      fromFarcasterTime(latestTimestamp).unwrapOr(0),
+      tags,
+    );
+    statsd().gauge(
+      "hub.submit_message_bundle.creation_time_ms",
+      fromFarcasterTime(creationFarcasterTime).unwrapOr(0),
+      tags,
+    );
+    statsd().gauge("hub.submit_message_bundle.max_delay_ms", creationFarcasterTime - earliestTimestamp, tags);
 
     // Merge the messages
     const mergeResults = await this.engine.mergeMessages(dedupedMessages.map((m) => m.message));
 
+    const errorLogs: string[] = [];
+    const infoLogs: string[] = [];
     for (const [j, result] of mergeResults.entries()) {
       const message = dedupedMessages[j]?.message as Message;
       const type = messageTypeToName(message.data?.type);
@@ -1701,32 +1803,28 @@ export class Hub implements HubInterface {
 
       result.match(
         (eventId) => {
-          if (this.options.logIndividualMessages) {
-            const logData = {
-              eventId,
-              fid: message.data?.fid,
-              type: type,
-              submittedMessage: messageToLog(message),
-              source,
-            };
-            const msg = "submitMessage success";
-
-            if (source === "sync") {
-              log.debug(logData, msg);
-            } else {
-              log.info(logData, msg);
-            }
-          } else {
-            this.submitMessageLogger.log(source ?? "unknown-source");
-          }
+          const parts = [
+            `event_id:${eventId}`,
+            `farcaster_ts:${message.data?.timestamp ?? "no-timestamp"}`,
+            `fid:${message.data?.fid ?? "no-fid"}`,
+            `hash:${bytesToHexString(message.hash).unwrapOr("no-hash")}`,
+            `message_type:${type}`,
+            `source:${source}`,
+          ];
+          infoLogs.push(`[${parts.join("|")}]`);
         },
         (e) => {
-          // message is a reserved key in some logging systems, so we use submittedMessage instead
-          const logMessage = log.child({
-            submittedMessage: messageToLog(message),
-            source,
-          });
-          logMessage.warn({ errCode: e.errCode, source }, `submitMessage error: ${e.message}`);
+          const parts = [
+            `farcaster_ts:${message.data?.timestamp ?? "no-timestamp"}`,
+            `fid:${message.data?.fid ?? "no-fid"}`,
+            `hash:${bytesToHexString(message.hash).unwrapOr("no-hash")}`,
+            `message_type:${type}`,
+            `source:${source ?? "unknown-source"}`,
+            `error:${e.message}`,
+            `error_code:${e.errCode}`,
+          ];
+          errorLogs.push(`[${parts.join("|")}]`);
+
           const tags: { [key: string]: string } = {
             error_code: e.errCode,
             message_type: type,
@@ -1735,6 +1833,12 @@ export class Hub implements HubInterface {
           statsd().increment("submit_message.error", 1, tags);
         },
       );
+    }
+    if (infoLogs.length > 0) {
+      log.info(infoLogs, "successful submit messages");
+    }
+    if (errorLogs.length > 0) {
+      log.error(errorLogs, "failed submit messages");
     }
 
     // Convert the merge results to an Array of HubResults with the key

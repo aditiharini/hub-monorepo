@@ -20,6 +20,7 @@ import {
   isUsernameProofMessage,
   isVerificationAddAddressMessage,
   LinkAddMessage,
+  LinkCompactStateMessage,
   LinkRemoveMessage,
   MergeOnChainEventHubEvent,
   MergeUsernameProofHubEvent,
@@ -72,6 +73,7 @@ import { rsValidationMethods } from "../../rustfunctions.js";
 import { RateLimiterAbstract, RateLimiterMemory } from "rate-limiter-flexible";
 import { TypedEmitter } from "tiny-typed-emitter";
 import { FNameRegistryEventsProvider } from "../../eth/fnameRegistryEventsProvider.js";
+import { statsd } from "../../utils/statsd.js";
 
 export const NUM_VALIDATION_WORKERS = 2;
 
@@ -410,9 +412,12 @@ class Engine extends TypedEmitter<EngineEvents> {
       stores.map(async (store, storeIndex) => {
         const storeMessages = messagesByStore[storeIndex] as IndexedMessage[];
 
+        const start = Date.now();
         const storeResults: Map<number, HubResult<number>> = await store.mergeMessages(
           storeMessages.map((m) => m.message),
         );
+        const duration = Date.now() - start;
+        statsd().timing("storage.merge_messages", duration, { store: store.postfix.toString() });
 
         for (const [j, v] of storeResults.entries()) {
           results.set(storeMessages[j]?.i as number, v);
@@ -1026,6 +1031,26 @@ class Engine extends TypedEmitter<EngineEvents> {
     }
 
     return ResultAsync.fromPromise(this._linkStore.getAllLinkMessagesByFid(fid, pageOptions), (e) => e as HubError);
+  }
+
+  async getLinkCompactStateMessageByFid(
+    fid: number,
+    pageOptions: PageOptions = {},
+  ): HubAsyncResult<MessagesPage<LinkCompactStateMessage>> {
+    const versionCheck = ensureAboveTargetFarcasterVersion("2024.3.20");
+    if (versionCheck.isErr()) {
+      return err(versionCheck.error);
+    }
+
+    const validatedFid = validations.validateFid(fid);
+    if (validatedFid.isErr()) {
+      return err(validatedFid.error);
+    }
+
+    return ResultAsync.fromPromise(
+      this._linkStore.getLinkCompactStateMessageByFid(fid, pageOptions),
+      (e) => e as HubError,
+    );
   }
 
   /* -------------------------------------------------------------------------- */

@@ -1,5 +1,92 @@
 # @farcaster/hubble
 
+## 1.14.1
+
+### Patch Changes
+
+- 2fa29ad4: fix: Upgrade grpc-js to 1.11
+- 095cca97: upgrade libp2p to 0.45.0
+- 7bee8436: perf: Add message merge timing at the store level
+- a9dd1621: revert: storage cache migration to rust
+
+## 1.14.0
+
+### Minor Changes
+
+- be54d203: fix: full state events should not include deleted messages
+
+### Patch Changes
+
+- a5f867fb: fix: Fix incorrect target fid check for link messages older than the compact state
+- d1dce89f: fix: do not let deleted fname events allow old fname events to be re-added
+- 554d82a4: fix: Migrate storage cache to rust and fix race condition
+
+## 1.13.8
+
+### Patch Changes
+
+- 76ad1ac2: feat: Expost event id functions
+- e2b1c7c6: - upgrade libp2p to 0.44.0
+- 97d0a7ea: fix: update hub storage requirement to 200 GB
+  - @farcaster/hub-nodejs@0.11.21
+
+## 1.13.7
+
+### Patch Changes
+
+- 312340d2: feat: Assign shards using jump consistent hashing algorithm
+  - @farcaster/hub-nodejs@0.11.20
+
+## 1.13.6
+
+### Patch Changes
+
+- fdcc3b52: chore: add stats for bundle message delays, stale contact info
+- fa5eef40: fix: Increase message threshold to reduce snapshot bandwidth usage
+- 795815af: fixed issue with cli arguments order in docker-compose.yml causing hub operator fid to be unset
+- b5ff774a: feat: add hub service agreement - there will be no rewards for running a hub
+- 2a82b3dc: feat: add unique peer map to sync engine to represent current active peers
+- aa02a48d: fix: validate gossip message for clock skew
+- 2bae6fb9: chore: Update curve25519-dalek from 4.1.1 to 4.1.3 in Rust extension
+
+## 1.13.5
+
+### Patch Changes
+
+- 224e75fa: fix: gossip contact info every 30 minutes instead of every minute, avoid gossiping contact info on peer connect, skip contact info updates that happen too frequently
+- c723f655: feat: Add endpoints to control sync
+- 667a5b30: feat: add experimental HTTP APIs to control sync
+- Updated dependencies [c723f655]
+  - @farcaster/hub-nodejs@0.11.19
+
+## 1.13.4
+
+### Patch Changes
+
+- 3f0fb85c: fix: remove nemes from mainnet bootstrap peers (deprecated)
+- 366ce95c: fix: Fix gossip worker spending too much time iterating peer store
+
+## 1.13.3
+
+### Patch Changes
+
+- 2d26d305: CLI tool for measuring sync health
+- b150e900: fix: Use stricter socket timeout for gossip
+- eacf29c9: fix: http endpoint return not found instead of internal database error
+  - @farcaster/hub-nodejs@0.11.18
+
+## 1.13.2
+
+### Patch Changes
+
+- e58e963d: fix: Always log when updating contact info
+- 27a1cfc8: fix: updated the cli tool to flush logs before exiting
+- f25f133f: chore: Segment bundle delay stats by message status
+- dab95118: Add rpc to expose LinkCompactStateMessage + explicit handling of type
+- 6ceb8f54: add libp2p/peer-store patch to resolve corrupt peer id loads
+- Updated dependencies [dab95118]
+  - @farcaster/hub-nodejs@0.11.17
+
 ## 1.13.1
 
 ### Patch Changes
@@ -570,7 +657,7 @@
 - 08b652e: fix: Add txIndex to onchain events, fix wrong index being used in the primary key
 - b36eef2: fix: Extract snapshot on the fly while downloading snapshot
 - 93e43a8: fix: Use hashes to compare upgrade 'hubble.sh' versions
-- 7daaae4: fix: Simplify IP addr fetching, prefering ipv4
+- 7daaae4: fix: Simplify IP addr fetching, preferring ipv4
 - ac1f6ac: fix: Fetch envoy config during hubble.sh
 - baf983f: fix: Consume the FID rate limit only after a successful merge
 - Updated dependencies [08b652e]
@@ -704,7 +791,7 @@
 - f00d7d2: fix: Move validatorOrRevokeMessage and storageCache iterators to be managed
 - 115f1b5: feat: Do the validateOrRevokeMessages job fid-by-fid
 - 998979d: feat: Warn if there are no incoming connections
-- c1bb21c: fix: When retring messages due to failed signers, use a queue
+- c1bb21c: fix: When retrying messages due to failed signers, use a queue
 - 376ae0f: feat: Use a web based network config for hubble
   - @farcaster/hub-nodejs@0.9.1
 

@@ -1,5 +1,5 @@
 import { HubRpcClient, Message, MessageType } from "@farcaster/hub-nodejs";
-import { DB, MessageRow } from "./db";
+import { DB, MessageRow, sql } from "./db";
 import { pino } from "pino";
 
 const MAX_PAGE_SIZE = 3_000;
@@ -38,7 +38,7 @@ export class MessageReconciliation {
       MessageType.VERIFICATION_ADD_ETH_ADDRESS,
       MessageType.USER_DATA_ADD,
     ]) {
-      this.log.info(`Reconciling messages for FID ${fid} of type ${type}`);
+      this.log.debug(`Reconciling messages for FID ${fid} of type ${type}`);
       await this.reconcileMessagesOfTypeForFid(fid, type, onHubMessage, onDbMessage);
     }
   }
@@ -57,14 +57,14 @@ export class MessageReconciliation {
       const messageHashes = messages.map((msg) => msg.hash);
 
       if (messageHashes.length === 0) {
-        this.log.info(`No messages of type ${type} for FID ${fid}`);
+        this.log.debug(`No messages of type ${type} for FID ${fid}`);
         continue;
       }
 
       const dbMessages = await this.db
         .selectFrom("messages")
         .select(["prunedAt", "revokedAt", "hash", "fid", "type", "raw"])
-        .where("hash", "in", messageHashes)
+        .where("hash", "=", sql`any(${messageHashes})`)
         .execute();
 
       const dbMessageHashes = dbMessages.reduce((acc, msg) => {
@@ -173,6 +173,20 @@ export class MessageReconciliation {
 
       if (!pageToken?.length) break;
       result = await this.client.getAllLinkMessagesByFid({ pageSize, pageToken, fid });
+    }
+
+    let deltaResult = await this.client.getLinkCompactStateMessageByFid({ fid, pageSize });
+    for (;;) {
+      if (deltaResult.isErr()) {
+        throw new Error(`Unable to get all link compact results for FID ${fid}: ${deltaResult.error?.message}`);
+      }
+
+      const { messages, nextPageToken: pageToken } = deltaResult.value;
+
+      yield messages;
+
+      if (!pageToken?.length) break;
+      deltaResult = await this.client.getLinkCompactStateMessageByFid({ pageSize, pageToken, fid });
     }
   }
 

@@ -227,6 +227,13 @@ impl StoreDef for CastStoreDef {
         })
     }
 
+    fn make_compact_state_prefix(&self, _fid: u32) -> Result<Vec<u8>, HubError> {
+        Err(HubError {
+            code: "bad_request.invalid_param".to_string(),
+            message: "Cast Store doesn't support compact state".to_string(),
+        })
+    }
+
     fn get_prune_size_limit(&self) -> u32 {
         self.prune_size_limit
     }
@@ -567,11 +574,8 @@ impl CastStore {
                 let ts_hash = key[ts_hash_offset..ts_hash_offset + TS_HASH_LENGTH]
                     .try_into()
                     .unwrap();
-                let message_primary_key = crate::store::message::make_message_primary_key(
-                    fid,
-                    store.postfix(),
-                    Some(&ts_hash),
-                );
+                let message_primary_key =
+                    message::make_message_primary_key(fid, store.postfix(), Some(&ts_hash));
 
                 message_keys.push(message_primary_key.to_vec());
                 if message_keys.len() >= page_options.page_size.unwrap_or(PAGE_SIZE_MAX) {

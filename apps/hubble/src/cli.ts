@@ -8,7 +8,6 @@ import fs, { existsSync } from "fs";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { Result, ResultAsync } from "neverthrow";
 import { dirname, resolve } from "path";
-import { exit } from "process";
 import {
   APP_VERSION,
   FARCASTER_VERSION,
@@ -61,6 +60,12 @@ const parseNumber = (string: string) => {
   const number = Number(string);
   if (isNaN(number)) throw new Error("Not a number.");
   return number;
+};
+
+// Use [return flushAndExit(code)] instead of [process.exit(code)] to ensure that logs get written. Prefixing with [return] maintains the type inferencing you get from using [process.exit].
+const flushAndExit = (exitCode: number) => {
+  logger.flush();
+  process.exit(exitCode);
 };
 
 const app = new Command();
@@ -212,16 +217,16 @@ app
           .teardown(shutdownReason)
           .then(() => {
             logger.info("Hub stopped gracefully");
-            process.exit(0);
+            return flushAndExit(0);
           })
           .catch((err) => {
             logger.error({ reason: `Error stopping hub: ${err}` });
-            process.exit(1);
+            return flushAndExit(1);
           });
 
         setTimeout(() => {
           logger.fatal("Forcing exit after grace period");
-          process.exit(1);
+          return flushAndExit(1);
         }, SHUTDOWN_GRACE_PERIOD_MS);
       }
     };
@@ -243,7 +248,7 @@ app
         StartupCheckStatus.ERROR,
         `Hubble requires at least 16GB of RAM to run. Detected ${totalMemory}GB`,
       );
-      process.exit(1);
+      return flushAndExit(1);
     } else {
       startupCheck.printStartupCheckStatus(StartupCheckStatus.OK, `Detected ${totalMemory}GB of RAM`);
     }
@@ -331,7 +336,7 @@ app
           `Failed to read identity from ${cliOptions.id}. Please run "yarn identity create".`,
           "https://www.thehubble.xyz/intro/install.html#installing-hubble\n",
         );
-        process.exit(1);
+        return flushAndExit(1);
       } else {
         peerId = peerIdR.value;
       }
@@ -360,7 +365,7 @@ app
           "https://www.thehubble.xyz/intro/install.html#installing-hubble\n",
         );
 
-        process.exit(1);
+        return flushAndExit(1);
       } else {
         peerId = peerIdR.value;
       }
@@ -614,8 +619,7 @@ app
 
     if (startupCheck.anyFailedChecks()) {
       logger.fatal({ reason: "Startup checks failed" }, "shutting down hub");
-      logger.flush();
-      process.exit(1);
+      return flushAndExit(1);
     }
 
     // Opt-out Diagnostics Reporting
@@ -650,10 +654,9 @@ app
       if (!startupCheck.anyFailedChecks()) {
         logger.fatal(hubResult.error);
         logger.fatal({ reason: "Hub Creation failed" }, "shutting down hub");
-
-        logger.flush();
       }
-      process.exit(1);
+
+      return flushAndExit(1);
     }
 
     if (statsDServer && !disableConsoleStatus) {
@@ -703,8 +706,8 @@ app
       try {
         await hub.teardown(HubShutdownReason.EXCEPTION);
       } finally {
-        logger.flush();
-        process.exit(1);
+        // Using return here would be unsafe
+        flushAndExit(1);
       }
     }
 
@@ -722,18 +725,18 @@ const s3SnapshotURL = new Command("snapshot-url")
     const network = farcasterNetworkFromJSON(options.network ?? FarcasterNetwork.MAINNET);
     if (network !== FarcasterNetwork.MAINNET) {
       console.error("Only mainnet snapshots are supported at this time");
-      exit(1);
+      return flushAndExit(1);
     }
 
     const response = await snapshotURLAndMetadata(network, 0, options.s3SnapshotBucket);
     if (response.isErr()) {
       console.error("error fetching snapshot data", response.error);
-      exit(1);
+      return flushAndExit(1);
     }
     const [url, metadata] = response.value;
     console.log(`${JSON.stringify(metadata, null, 2)}`);
     console.log(`Download chunks under directory at: ${url}`);
-    exit(0);
+    return flushAndExit(1);
   });
 
 app.addCommand(s3SnapshotURL);
@@ -780,7 +783,7 @@ const createIdCommand = new Command("create")
       await writePeerId(peerId, resolve(path));
     }
 
-    exit(0);
+    return flushAndExit(0);
   });
 
 const verifyIdCommand = new Command("verify")
@@ -789,7 +792,7 @@ const verifyIdCommand = new Command("verify")
   .action(async (options) => {
     const peerId = await readPeerId(options.id);
     logger.info(`Successfully Read peerId: ${peerId.toString()} from ${options.id}`);
-    exit(0);
+    return flushAndExit(0);
   });
 
 app
@@ -824,7 +827,7 @@ app
         "The 'status' command has been deprecated\n" +
         "Please use Grafana monitoring. See https://www.thehubble.xyz/intro/monitoring.html\n",
     );
-    exit(0);
+    return flushAndExit(0);
   });
 
 /*//////////////////////////////////////////////////////////////
@@ -850,7 +853,7 @@ const storageProfileCommand = new Command("storage")
     }
 
     await rocksDB.close();
-    exit(0);
+    return flushAndExit(0);
   });
 
 const rpcProfileCommand = new Command("rpc")
@@ -917,7 +920,7 @@ app
     }
 
     logger.info({ rocksDBName }, "Database cleared.");
-    exit(0);
+    return flushAndExit(0);
   });
 
 /*//////////////////////////////////////////////////////////////
