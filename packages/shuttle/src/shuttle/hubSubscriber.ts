@@ -253,7 +253,14 @@ export class EventStreamHubSubscriber extends BaseHubSubscriber {
       const eventToWriteBatch = eventsToWriteBatch.map(([evt, _evtBytes]) => evt);
       const eventBytesToWriteBatch = eventsToWriteBatch.map(([_evt, evtBytes]) => evtBytes);
       // Copies the removed events to the stream
+      const startRedisAdd = Date.now();
       await this.eventStream.add(this.streamKey, eventBytesToWriteBatch);
+      const redisAddTime = Date.now() - startRedisAdd;
+
+      statsd.timing("hub.event.subscriber.redis_add_time.per_batch", redisAddTime, { source: this.shardKey });
+      statsd.timing("hub.event.subscriber.redis_add_time.per_event", redisAddTime / eventsToWriteBatch.length, {
+        source: this.shardKey,
+      });
 
       this.eventBatchLastFlushedAt = Date.now();
 
@@ -268,9 +275,9 @@ export class EventStreamHubSubscriber extends BaseHubSubscriber {
 
       const processTime = Date.now() - startTime;
 
-      statsd.gauge("hub.event.subscriber.last_batch_size", events.length, { source: this.shardKey });
+      statsd.gauge("hub.event.subscriber.last_batch_size", eventsToWriteBatch.length, { source: this.shardKey });
 
-      statsd.timing("hub.event.subscriber.process_time.per_event", processTime / events.length, {
+      statsd.timing("hub.event.subscriber.process_time.per_event", processTime / eventsToWriteBatch.length, {
         source: this.shardKey,
       });
 
