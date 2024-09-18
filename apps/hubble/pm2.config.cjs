@@ -18,12 +18,14 @@ module.exports = {
       // This is only necessary when running via PM2.
       args: process.env.HUBBLE_ARGS,
       env: {
-        "CATCHUP_SYNC_WITH_SNAPSHOT": process.env.CATCHUP_SYNC_WITH_SNAPSHOT ? (process.env.CATCHUP_SYNC_WITH_SNAPSHOT === "true") : "true",
-        "HUBBLE_NODE_ARGS": process.env.HUBBLE_NODE_ARGS || "",
+        CATCHUP_SYNC_WITH_SNAPSHOT: process.env.CATCHUP_SYNC_WITH_SNAPSHOT
+          ? process.env.CATCHUP_SYNC_WITH_SNAPSHOT === "true"
+          : "true",
+        HUBBLE_NODE_ARGS: process.env.HUBBLE_NODE_ARGS || "",
       },
       watch: false,
       log_type: "json",
-      out_file: "/dev/null",
+      out_file: "/dev/stdout",
       err_file: "/dev/stderr",
       restart_delay: 35_000, // Time between restarts is just longer than 30s timeout in hubs
       min_uptime: 60_000, // Min uptime before the app can be considered started
