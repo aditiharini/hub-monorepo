@@ -10,7 +10,9 @@
 
 services:
   hubble:
-    image: farcasterxyz/hubble:latest
+    build:
+      context: .
+      dockerfile: ../../Dockerfile.hubble
     pull_policy: always
     restart: always
     command: ["npx", "pm2-runtime", "start", "pm2.config.cjs"]

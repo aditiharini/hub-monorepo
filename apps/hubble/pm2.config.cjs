@@ -25,8 +25,8 @@ module.exports = {
       },
       watch: false,
       log_type: "json",
-      out_file: "out.log",
-      err_file: "err.log",
+      out_file: "./out.log",
+      err_file: "./err.log",
       restart_delay: 35_000, // Time between restarts is just longer than 30s timeout in hubs
       min_uptime: 60_000, // Min uptime before the app can be considered started
       listen_timeout: 30_000, // Time before forcing a reload if app not listening
