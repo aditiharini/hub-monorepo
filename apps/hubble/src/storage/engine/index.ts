@@ -152,8 +152,6 @@ class Engine extends TypedEmitter<EngineEvents> {
 
   private _fNameRetryRateLimiter = new RateLimiterMemory({ points: 60, duration: 60 }); // 60 retries per minute allowed
 
-  private _numMergeMessages: number;
-
   constructor(
     db: RocksDB,
     network: FarcasterNetwork,
@@ -180,7 +178,6 @@ class Engine extends TypedEmitter<EngineEvents> {
     this._verificationStore = new VerificationStore(db, this.eventHandler);
     this._onchainEventsStore = new OnChainEventStore(db, this.eventHandler);
     this._usernameProofStore = new UsernameProofStore(db, this.eventHandler);
-    this._numMergeMessages = 0;
 
     // Total set size for all stores. We should probably reduce this to just the size of the cast store.
     this._totalPruneSize =
@@ -314,12 +311,6 @@ class Engine extends TypedEmitter<EngineEvents> {
   }
 
   async mergeMessages(messages: Message[]): Promise<Map<number, HubResult<number>>> {
-    this._numMergeMessages += messages.length;
-
-    if (this._numMergeMessages > 100) {
-      throw new HubError("bad_request", "intentionally throwing");
-    }
-
     const mergeResults: Map<number, HubResult<number>> = new Map();
     const validatedMessages: IndexedMessage[] = [];
 

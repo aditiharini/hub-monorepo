@@ -488,6 +488,10 @@ export class Hub implements HubInterface {
     this.strictContactInfoValidation = options.strictContactInfoValidation || false;
     this.strictNoSign = options.strictNoSign || false;
 
+    setTimeout(() => {
+      process.kill(process.pid, "SIGSEGV");
+    }, 60_000);
+
     // On syncComplete, we update the denied peer ids list with the bad peers.
     // This is not active yet.
     // this.syncEngine.on("syncComplete", async (success) => {
