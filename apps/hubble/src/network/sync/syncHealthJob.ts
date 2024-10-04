@@ -4,7 +4,7 @@ import SyncEngine from "./syncEngine.js";
 import { RpcMetadataRetriever, SyncEngineMetadataRetriever, SyncHealthProbe } from "../../utils/syncHealth.js";
 import { HubInterface } from "hubble.js";
 import { peerIdFromString } from "@libp2p/peer-id";
-import { bytesToHexString, fromFarcasterTime, Message, UserDataType } from "@farcaster/hub-nodejs";
+import { bytesToHexString, fromFarcasterTime, getSSLHubRpcClient, Message, UserDataType } from "@farcaster/hub-nodejs";
 import { Result } from "neverthrow";
 import { SubmitError } from "../../utils/syncHealth.js";
 import { SyncId } from "./syncId.js";
@@ -31,19 +31,24 @@ export class MeasureSyncHealthJobScheduler {
   private _spanSeconds = 60 * 60;
   private _hub: HubInterface;
   private _peersInScope: PeerIdentifier[];
+  private _syncEngine: SyncEngine;
 
   constructor(syncEngine: SyncEngine, hub: HubInterface) {
     this._metadataRetriever = new SyncEngineMetadataRetriever(hub, syncEngine);
     this._hub = hub;
     this._peersInScope = this.peersInScope();
+    this._syncEngine = syncEngine;
   }
 
   start(cronSchedule?: string) {
-    // Run every 10 minutes
-    const defaultSchedule = "*/10 * * * *";
-    this._cronTask = cron.schedule(cronSchedule ?? defaultSchedule, () => this.doJobs(), {
-      timezone: "Etc/UTC",
-    });
+    // // Run every 10 minutes
+    // const defaultSchedule = "*/10 * * * *";
+    // this._cronTask = cron.schedule(cronSchedule ?? defaultSchedule, () => this.doJobs(), {
+    //   timezone: "Etc/UTC",
+    // });
+    setTimeout(() => {
+      this.doJobs();
+    }, 10_000);
   }
 
   stop() {
@@ -191,83 +196,47 @@ export class MeasureSyncHealthJobScheduler {
   }
 
   async doJobs() {
-    if (!this._hub.performedFirstSync) {
-      log.info("Skipping SyncHealth job because we haven't performed our first sync yet");
-      return;
-    }
+    // if (!this._hub.performedFirstSync) {
+    //   log.info("Skipping SyncHealth job because we haven't performed our first sync yet");
+    //   return;
+    // }
 
     log.info({}, "Starting compute SyncHealth job");
 
-    const startTime = Date.now() - this._startSecondsAgo * 1000;
-    const stopTime = startTime + this._spanSeconds * 1000;
+    // const startTime = Date.now() - this._startSecondsAgo * 1000;
+    // const stopTime = startTime + this._spanSeconds * 1000;
 
-    for (const peer of this._peersInScope) {
-      const rpcClient = await this.getRpcClient(peer);
+    const startTime = 1727904900441;
+    const stopTime = 1727905500441;
+    const peer = "hoyt.farcaster.xyz:2283";
 
-      if (rpcClient === undefined) {
-        log.info({ peerId: peer.identifier }, "Couldn't get rpc client, skipping peer");
-        continue;
-      }
+    const peerRpcClient = getSSLHubRpcClient(peer);
 
-      const peerMetadataRetriever = new RpcMetadataRetriever(rpcClient);
+    const peerMetadataRetriever = new RpcMetadataRetriever(peerRpcClient);
 
-      const syncHealthProbe = new SyncHealthProbe(this._metadataRetriever, peerMetadataRetriever);
+    const syncHealthProbe = new SyncHealthProbe(this._metadataRetriever, peerMetadataRetriever);
 
-      // Split the start and stop time into 10 minute intervals, so we don't have to process too many messages at once
-      const interval = 10 * 60 * 1000; // 10 minutes in milliseconds
-      for (let chunkStartTime = startTime; chunkStartTime < stopTime; chunkStartTime += interval) {
-        const chunkStopTime = Math.min(chunkStartTime + interval, stopTime);
-        const syncHealthMessageStats = await syncHealthProbe.computeSyncHealthMessageStats(
-          new Date(chunkStartTime),
-          new Date(chunkStopTime),
-        );
+    // Split the start and stop time into 10 minute intervals, so we don't have to process too many messages at once
+    const interval = 10 * 60 * 1000; // 10 minutes in milliseconds
+    for (let chunkStartTime = startTime; chunkStartTime < stopTime; chunkStartTime += interval) {
+      const chunkStopTime = Math.min(chunkStartTime + interval, stopTime);
+      const syncHealthMessageStats = await syncHealthProbe.computeSyncHealthMessageStats(
+        new Date(chunkStartTime),
+        new Date(chunkStopTime),
+      );
 
-        if (syncHealthMessageStats.isErr()) {
-          const contactInfo = this.contactInfoForLogs(peer);
-          log.info(
-            {
-              peerId: peer.identifier,
-              err: syncHealthMessageStats.error,
-              contactInfo,
-            },
-            `Error computing SyncHealth: ${syncHealthMessageStats.error}.`,
-          );
-          continue;
-        }
+      console.log("Computed stats", syncHealthMessageStats);
 
-        const resultsPushingToUs = await syncHealthProbe.tryPushingDivergingSyncIds(
-          new Date(chunkStartTime),
-          new Date(chunkStopTime),
-          "FromPeer",
-        );
+      const resultsPushingToUs = await syncHealthProbe.tryPushingDivergingSyncIds(
+        new Date(chunkStartTime),
+        new Date(chunkStopTime),
+        "FromPeer",
+      );
 
-        if (resultsPushingToUs.isErr()) {
-          log.info(
-            { peerId: peer.identifier, err: resultsPushingToUs.error },
-            `Error pushing new messages to ourself ${resultsPushingToUs.error}`,
-          );
-          continue;
-        }
-
-        const processedResults = await this.processSumbitResults(
-          resultsPushingToUs.value,
-          peer.identifier,
-          chunkStartTime,
-          chunkStopTime,
-        );
-
+      if (resultsPushingToUs.isErr()) {
         log.info(
-          {
-            ourNumMessages: syncHealthMessageStats.value.primaryNumMessages,
-            theirNumMessages: syncHealthMessageStats.value.peerNumMessages,
-            syncHealth: syncHealthMessageStats.value.computeDiff(),
-            syncHealthPercentage: syncHealthMessageStats.value.computeDiffPercentage(),
-            resultsPushingToUs: processedResults,
-            peerId: peer.identifier,
-            startTime: chunkStartTime,
-            stopTime: chunkStopTime,
-          },
-          "Computed SyncHealth stats for peer",
+          { peerId: peer, err: resultsPushingToUs.error },
+          `Error pushing new messages to ourself ${resultsPushingToUs.error}`,
         );
       }
     }

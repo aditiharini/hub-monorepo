@@ -493,6 +493,7 @@ export class SyncHealthProbe {
     metadataRetrieverMissingMessages: MetadataRetriever,
     missingSyncIds: Buffer[],
   ) => {
+    console.log(`Pushing ${missingSyncIds.length} messages`);
     if (missingSyncIds.length === 0) {
       return ok([]);
     }
@@ -523,6 +524,7 @@ export class SyncHealthProbe {
   };
 
   divergingSyncIds = async (startTime: Date, stopTime: Date) => {
+    console.log("Starting to compute diverging sync ids");
     const primarySyncIds = await computeSyncIdsInSpan(
       this._primaryMetadataRetriever,
       startTime,
@@ -533,6 +535,8 @@ export class SyncHealthProbe {
     if (primarySyncIds.isErr()) {
       return err(primarySyncIds.error);
     }
+
+    console.log(`Got ${primarySyncIds.value.length} primary sync ids`);
 
     const peerSyncIds = await computeSyncIdsInSpan(
       this._peerMetadataRetriever,
@@ -545,8 +549,10 @@ export class SyncHealthProbe {
       return err(peerSyncIds.error);
     }
 
+    console.log(`Got ${peerSyncIds.value.length} peer sync ids`);
     const idsOnlyInPrimary = uniqueSyncIds(primarySyncIds.value, peerSyncIds.value);
     const idsOnlyInPeer = uniqueSyncIds(peerSyncIds.value, primarySyncIds.value);
+    console.log("Done computing diverging sync ids");
     return ok({ idsOnlyInPrimary, idsOnlyInPeer });
   };
 
