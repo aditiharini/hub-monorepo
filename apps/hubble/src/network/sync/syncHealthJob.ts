@@ -207,7 +207,7 @@ export class MeasureSyncHealthJobScheduler {
     // const stopTime = startTime + this._spanSeconds * 1000;
 
     const startTime = 1727904900441;
-    const stopTime = 1727905500441;
+    const stopTime = startTime + 90 * 60 * 1000;
     const peer = "hoyt.farcaster.xyz:2283";
 
     const peerRpcClient = getSSLHubRpcClient(peer);
@@ -217,7 +217,7 @@ export class MeasureSyncHealthJobScheduler {
     const syncHealthProbe = new SyncHealthProbe(this._metadataRetriever, peerMetadataRetriever);
 
     // Split the start and stop time into 10 minute intervals, so we don't have to process too many messages at once
-    const interval = 10 * 60 * 1000; // 10 minutes in milliseconds
+    const interval = 90 * 60 * 1000; // 10 minutes in milliseconds
     for (let chunkStartTime = startTime; chunkStartTime < stopTime; chunkStartTime += interval) {
       const chunkStopTime = Math.min(chunkStartTime + interval, stopTime);
       const syncHealthMessageStats = await syncHealthProbe.computeSyncHealthMessageStats(
