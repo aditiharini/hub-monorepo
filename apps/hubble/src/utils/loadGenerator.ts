@@ -19,6 +19,7 @@ import {
   HubEventType,
   HubEvent,
   ClientReadableStream,
+  Factories,
 } from "@farcaster/hub-nodejs";
 
 import { TypedEmitter } from "tiny-typed-emitter";
@@ -30,6 +31,7 @@ import { addressInfoFromGossip, addressInfoToString } from "./p2p.js";
 import { SyncId, timestampToPaddedTimestampPrefix } from "../network/sync/syncId.js";
 import { err, ok, Result } from "neverthrow";
 import { randomUUID } from "crypto";
+import { rpc } from "viem/utils";
 
 const MAX_FID = 500_000;
 const MAX_PAGE_SIZE = 500;
@@ -495,23 +497,43 @@ const getDataForFid = async (
   }
 };
 
-const generate = async (rpcAddrInfo: string) => {
-  const rpcClient = getSSLHubRpcClient(rpcAddrInfo);
+// const realMessageHex =
+//   "0a2b080310f70e18e8f8f72720013a1d0801121908c3201214cf64961ebcdc9089a1843fbe6a175c53228935871214fafa8845520220e317d54800beff9b500e84b9a418012240640e0e1e8e281a5d6fcf76b568e8959e18ffdb3c9cf99d89a897f3f987341329b7f1bf66a14fad538eb17caec734c94b19ecf8371441023c51f0227333c7be0128013220f3c0956b7c78899a1633c3b4a650835043e50d78a56d6b7d8b28735ae11b9c74";
 
-  const subscriber = new SimpleSubscriber("dummy", rpcClient);
-  subscriber.start().catch((e) => {
-    console.log("Error with susbscribe", e);
-  });
-  const reconciler = new MessageReconciliation(rpcClient);
-  const types = [MessageType.CAST_ADD, MessageType.LINK_ADD, MessageType.VERIFICATION_ADD_ETH_ADDRESS];
-  const startTimestamp = computeStartTimestamp()._unsafeUnwrap();
-
-  for (let fid = 0; fid < MAX_FID; fid++) {
-    // don't await
-    getDataForFid(fid, startTimestamp, reconciler, types);
+const submitBulkMessages = async (rpcClient: HubRpcClient) => {
+  const messages = [];
+  //   const buf = Buffer.from(realMessageHex);
+  const count = 12_000;
+  for (let i = 0; i < count; i++) {
+    const msg = await Factories.Message.create({
+      data: { fid: i + 1, timestamp: getFarcasterTime()._unsafeUnwrap() - i * 100 },
+    });
+    messages.push(msg);
   }
+  const response = await rpcClient.submitBulkMessages({ messages });
+  console.log(response);
 };
 
-generate("shane.merkle.zone:2283").catch((e) => {
+const generate = async (rpcAddrInfo: string) => {
+  const rpcClient = getInsecureHubRpcClient(rpcAddrInfo);
+  setInterval(() => {
+    submitBulkMessages(rpcClient);
+  }, 10_000);
+
+  //   const subscriber = new SimpleSubscriber("dummy", rpcClient);
+  //   subscriber.start().catch((e) => {
+  //     console.log("Error with susbscribe", e);
+  //   });
+  //   const reconciler = new MessageReconciliation(rpcClient);
+  //   const types = [MessageType.CAST_ADD, MessageType.LINK_ADD, MessageType.VERIFICATION_ADD_ETH_ADDRESS];
+  //   const startTimestamp = computeStartTimestamp()._unsafeUnwrap();
+
+  //   for (let fid = 0; fid < MAX_FID; fid++) {
+  //     // don't await
+  //     getDataForFid(fid, startTimestamp, reconciler, types);
+  //   }
+};
+
+generate("0.0.0.0:2283").catch((e) => {
   console.log("Error in script", e);
 });

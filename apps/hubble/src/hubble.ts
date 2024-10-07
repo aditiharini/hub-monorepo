@@ -384,6 +384,7 @@ export class Hub implements HubInterface {
   private allowlistedImmunePeers: string[] | undefined;
   private strictContactInfoValidation: boolean;
   private strictNoSign: boolean;
+  private lastHeapDumpTime: number;
 
   private pruneMessagesJobScheduler: PruneMessagesJobScheduler;
   private periodSyncJobScheduler: PeriodicSyncJobScheduler;
@@ -450,6 +451,7 @@ export class Hub implements HubInterface {
 
     this.rocksDB = new RocksDB(options.rocksDBName ? options.rocksDBName : randomDbName());
     this.gossipNode = new GossipNode(this.rocksDB, this.options.network);
+    this.lastHeapDumpTime = 0;
 
     const eventHandler = new StoreEventHandler(this.rocksDB, {
       lockMaxPending: options.commitLockMaxPending,
@@ -803,27 +805,27 @@ export class Hub implements HubInterface {
       : undefined;
 
     // Start the Gossip node
-    // await this.gossipNode.start(this.bootstrapAddrs(), {
-    //   peerId,
-    //   ipMultiAddr: this.options.ipMultiAddr,
-    //   announceIp: this.options.announceIp,
-    //   gossipPort: this.options.gossipPort,
-    //   allowedPeerIdStrs: this.allowedPeerIds,
-    //   deniedPeerIdStrs: this.deniedPeerIds,
-    //   directPeers: this.options.directPeers,
-    //   allowlistedImmunePeers: this.options.allowlistedImmunePeers,
-    //   applicationScoreCap: this.options.applicationScoreCap,
-    //   strictNoSign: this.strictNoSign,
-    //   connectToDbPeers: this.options.connectToDbPeers,
-    //   statsdParams: this.options.statsdParams,
-    // });
+    await this.gossipNode.start(this.bootstrapAddrs(), {
+      peerId,
+      ipMultiAddr: this.options.ipMultiAddr,
+      announceIp: this.options.announceIp,
+      gossipPort: this.options.gossipPort,
+      allowedPeerIdStrs: this.allowedPeerIds,
+      deniedPeerIdStrs: this.deniedPeerIds,
+      directPeers: this.options.directPeers,
+      allowlistedImmunePeers: this.options.allowlistedImmunePeers,
+      applicationScoreCap: this.options.applicationScoreCap,
+      strictNoSign: this.strictNoSign,
+      connectToDbPeers: this.options.connectToDbPeers,
+      statsdParams: this.options.statsdParams,
+    });
 
     await this.registerEventHandlers();
 
     // Start cron tasks
-    // this.pruneMessagesJobScheduler.start(this.options.pruneMessagesJobCron);
-    // this.periodSyncJobScheduler.start();
-    // this.pruneEventsJobScheduler.start(this.options.pruneEventsJobCron);
+    this.pruneMessagesJobScheduler.start(this.options.pruneMessagesJobCron);
+    this.periodSyncJobScheduler.start();
+    this.pruneEventsJobScheduler.start(this.options.pruneEventsJobCron);
     this.checkFarcasterVersionJobScheduler.start();
     this.validateOrRevokeMessagesJobScheduler.start();
 
@@ -858,12 +860,12 @@ export class Hub implements HubInterface {
       statsd().gauge("memory.external", memoryData.external);
 
       // Uncomment this code to enable heap dumps
-      // if (memoryData.heapUsed > 3 * 1024 * 1024 * 1024 && Date.now() - lastHeapDumpTime > 10 * 60 * 1000) {
+      // if (memoryData.heapUsed > 3 * 1024 * 1024 * 1024 && Date.now() - this.lastHeapDumpTime > 10 * 60 * 1000) {
       //   const fileName = `${DB_DIRECTORY}/process/HeapDump-${Date.now()}.heapsnapshot`;
 
       //   const writtenFileName = v8.writeHeapSnapshot(fileName);
       //   log.info({ writtenFileName }, "Wrote heap snapshot");
-      //   lastHeapDumpTime = Date.now();
+      //   this.lastHeapDumpTime = Date.now();
       // }
     }, 60 * 1000);
   }
@@ -1873,8 +1875,9 @@ export class Hub implements HubInterface {
     const dedupedMessages: { i: number; message: Message }[] = [];
     let earliestTimestamp = Infinity;
     let latestTimestamp = -Infinity;
-    if (source === "gossip") {
+    if (source === "gossip" || source === "rpc") {
       // Go over all the messages and see if they are in the DB. If they are, don't bother processing them
+      log.info("Got to areMessagesInDb check");
       const messagesExist = await areMessagesInDb(this.rocksDB, messageBundle.messages);
 
       for (let i = 0; i < messagesExist.length; i++) {

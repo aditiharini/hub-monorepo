@@ -41,14 +41,11 @@ export class MeasureSyncHealthJobScheduler {
   }
 
   start(cronSchedule?: string) {
-    // // Run every 10 minutes
-    // const defaultSchedule = "*/10 * * * *";
-    // this._cronTask = cron.schedule(cronSchedule ?? defaultSchedule, () => this.doJobs(), {
-    //   timezone: "Etc/UTC",
-    // });
-    setTimeout(() => {
-      this.doJobs();
-    }, 10_000);
+    // Run every 10 minutes
+    const defaultSchedule = "*/5 * * * *";
+    this._cronTask = cron.schedule(cronSchedule ?? defaultSchedule, () => this.doJobs(), {
+      timezone: "Etc/UTC",
+    });
   }
 
   stop() {
@@ -203,11 +200,9 @@ export class MeasureSyncHealthJobScheduler {
 
     log.info({}, "Starting compute SyncHealth job");
 
-    // const startTime = Date.now() - this._startSecondsAgo * 1000;
-    // const stopTime = startTime + this._spanSeconds * 1000;
+    const startTime = Date.now() - this._startSecondsAgo * 1000;
+    const stopTime = startTime + this._spanSeconds * 1000;
 
-    const startTime = 1727904900441;
-    const stopTime = startTime + 90 * 60 * 1000;
     const peer = "hoyt.farcaster.xyz:2283";
 
     const peerRpcClient = getSSLHubRpcClient(peer);
@@ -217,7 +212,7 @@ export class MeasureSyncHealthJobScheduler {
     const syncHealthProbe = new SyncHealthProbe(this._metadataRetriever, peerMetadataRetriever);
 
     // Split the start and stop time into 10 minute intervals, so we don't have to process too many messages at once
-    const interval = 90 * 60 * 1000; // 10 minutes in milliseconds
+    const interval = stopTime - startTime; // 10 minutes in milliseconds
     for (let chunkStartTime = startTime; chunkStartTime < stopTime; chunkStartTime += interval) {
       const chunkStopTime = Math.min(chunkStartTime + interval, stopTime);
       const syncHealthMessageStats = await syncHealthProbe.computeSyncHealthMessageStats(
@@ -225,7 +220,7 @@ export class MeasureSyncHealthJobScheduler {
         new Date(chunkStopTime),
       );
 
-      console.log("Computed stats", syncHealthMessageStats);
+      log.info({ stats: syncHealthMessageStats }, "Computed SyncHealth stats");
 
       const resultsPushingToUs = await syncHealthProbe.tryPushingDivergingSyncIds(
         new Date(chunkStartTime),
