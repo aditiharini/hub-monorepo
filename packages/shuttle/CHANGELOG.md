@@ -1,5 +1,11 @@
 # @farcaster/hub-shuttle
 
+## 0.6.5
+
+### Patch Changes
+
+- 64084968: feat(shuttle): Support deleting messages on DB that are missing on hub
+
 ## 0.6.4
 
 ### Patch Changes
