@@ -20,6 +20,7 @@ import {
   HubEvent,
   ClientReadableStream,
   Factories,
+  getAuthMetadata,
 } from "@farcaster/hub-nodejs";
 
 import { TypedEmitter } from "tiny-typed-emitter";
@@ -32,6 +33,7 @@ import { SyncId, timestampToPaddedTimestampPrefix } from "../network/sync/syncId
 import { err, ok, Result } from "neverthrow";
 import { randomUUID } from "crypto";
 import { rpc } from "viem/utils";
+import { messageToLog } from "./logger.js";
 
 const MAX_FID = 500_000;
 const MAX_PAGE_SIZE = 500;
@@ -193,14 +195,6 @@ export class BaseHubSubscriber extends HubSubscriber {
         }
       }
     }
-  }
-}
-
-export class SimpleSubscriber extends BaseHubSubscriber {
-  public override async processHubEvent(event: HubEvent) {
-    console.log("Received event from subscribe");
-    await new Promise((r) => setTimeout(r, 20));
-    return true;
   }
 }
 
@@ -497,6 +491,62 @@ const getDataForFid = async (
   }
 };
 
+export class SimpleSubscriber extends BaseHubSubscriber {
+  private messages: Message[];
+  private submitRpcClient: HubRpcClient;
+
+  constructor(
+    label: string,
+    hubClient: HubRpcClient,
+    submitRpcClient: HubRpcClient,
+    eventTypes?: HubEventType[],
+    totalShards?: number,
+    shardIndex?: number,
+  ) {
+    super(label, hubClient, eventTypes, totalShards, shardIndex);
+    this.messages = [];
+    this.submitRpcClient = submitRpcClient;
+  }
+
+  public override async processHubEvent(event: HubEvent) {
+    if (event.type === HubEventType.MERGE_MESSAGE) {
+      if (event.mergeMessageBody === undefined) {
+        throw new Error("Unexpected empty mergeMessageBody");
+      }
+      if (event.mergeMessageBody.message === undefined) {
+        throw new Error("Unexpected empty message");
+      }
+      this.messages.push(event.mergeMessageBody.message);
+      if (this.messages.length % 100 === 0) {
+        console.log(`Received ${this.messages.length} messages`);
+      }
+    }
+
+    const username = process.env["AUTH_USERNAME"];
+    if (username === undefined) {
+      throw new Error("Username required");
+    }
+
+    const password = process.env["AUTH_PASSWORD"];
+
+    if (password === undefined) {
+      throw new Error("Password required");
+    }
+
+    const authMetadata = getAuthMetadata(username, password);
+    if (this.messages.length > 10_000) {
+      console.log("Attempting to submit messages");
+      for (const message of this.messages) {
+        console.log(messageToLog(message));
+      }
+      const response = await this.submitRpcClient.submitBulkMessages({ messages: this.messages }, authMetadata);
+      console.log(response);
+      this.messages = [];
+    }
+
+    return true;
+  }
+}
 // const realMessageHex =
 //   "0a2b080310f70e18e8f8f72720013a1d0801121908c3201214cf64961ebcdc9089a1843fbe6a175c53228935871214fafa8845520220e317d54800beff9b500e84b9a418012240640e0e1e8e281a5d6fcf76b568e8959e18ffdb3c9cf99d89a897f3f987341329b7f1bf66a14fad538eb17caec734c94b19ecf8371441023c51f0227333c7be0128013220f3c0956b7c78899a1633c3b4a650835043e50d78a56d6b7d8b28735ae11b9c74";
 
@@ -514,11 +564,18 @@ const submitBulkMessages = async (rpcClient: HubRpcClient) => {
   console.log(response);
 };
 
-const generate = async (rpcAddrInfo: string) => {
-  const rpcClient = getInsecureHubRpcClient(rpcAddrInfo);
-  setInterval(() => {
-    submitBulkMessages(rpcClient);
-  }, 10_000);
+const generate = async () => {
+  const kassadRpcClient = getSSLHubRpcClient("kassad.merkle.zone:2283");
+  const shaneRpcClient = getSSLHubRpcClient("shane.merkle.zone:2283");
+
+  const subscriber = new SimpleSubscriber("dummy", kassadRpcClient, shaneRpcClient);
+  subscriber.start().catch((e) => {
+    console.log("Error with susbscribe", e);
+  });
+
+  // setInterval(() => {
+  //   submitBulkMessages(rpcClient);
+  // }, 10_000);
 
   //   const subscriber = new SimpleSubscriber("dummy", rpcClient);
   //   subscriber.start().catch((e) => {
@@ -534,6 +591,6 @@ const generate = async (rpcAddrInfo: string) => {
   //   }
 };
 
-generate("0.0.0.0:2283").catch((e) => {
+generate().catch((e) => {
   console.log("Error in script", e);
 });
